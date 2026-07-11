@@ -73,6 +73,14 @@
   .duo .cd{font-size:15px}
   .duo .arrb{font-size:23px;font-weight:700;color:var(--amber);font-variant-numeric:tabular-nums;letter-spacing:.5px}
   .row.next{background:rgba(255,181,49,.06);box-shadow:inset 3px 0 0 var(--amber)}
+  /* transfer leg 2: three columns (depart clock · leave-in timer · final arrive clock) — tighter to fit */
+  .trio{flex:0 0 auto;display:flex;gap:7px;align-items:flex-end}
+  .trio .col{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+  .trio .col i{font-style:normal;font-size:7px;letter-spacing:.5px;color:var(--dim);white-space:nowrap}
+  .trio .dep{font-size:13px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+  .trio .cd{font-size:13px}
+  .trio .arrb{font-size:17px;font-weight:700;color:var(--amber);font-variant-numeric:tabular-nums;letter-spacing:.3px}
+  .row:has(.trio) .dest{flex:0 1 auto;min-width:64px}   /* trio needs more width than dest can spare on a narrow phone */
 
   /* ---------- hero banner: the answer, huge (arrival mode only) ---------- */
   #hero{display:none;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;
@@ -378,15 +386,24 @@ function render(){
         right + `</div>`;
     }).join("");
   } else if(transfer){
-    const legRow = (leg, label, whenLbl, whenMs) => { const cd = countdown(leg.eta - now);
-      return `<div class="row"><span class="chip" style="background:${esc(leg.color)};color:${esc(leg.text)}">${esc(leg.k)}</span>` +
-        `<span class="dest">${esc(leg.dest)}<small>${esc(label)}</small></span>` +
-        `<span class="duo"><span class="col"><i>LEAVE&nbsp;IN</i><span class="cd ${cd.cls}">${cd.label}</span></span>` +
-        `<span class="col"><i>${whenLbl}</i><span class="arrb">${fmtArr(whenMs)}</span></span></span></div>`; };
+    // leg A: your ride to the transfer station — leave-in timer + the clock time you get there
+    // (the "via {station}" name is already the note text below, so the column label stays short)
+    const cdA = countdown(transfer.leg1.eta - now);
+    const rowA = `<div class="row"><span class="chip" style="background:${esc(transfer.leg1.color)};color:${esc(transfer.leg1.text)}">${esc(transfer.leg1.k)}</span>` +
+      `<span class="dest">${esc(transfer.leg1.dest)}<small>toward ${esc(transfer.leg1.dest)}</small></span>` +
+      `<span class="duo"><span class="col"><i>LEAVE&nbsp;IN</i><span class="cd ${cdA.cls}">${cdA.label}</span></span>` +
+      `<span class="col"><i>TRANSFER</i><span class="arrb">${fmtArr(transfer.leg1Arr)}</span></span></span></div>`;
+    // leg B: the connecting train — its own clock DEPART time, a leave-in timer to that departure
+    // (same style as every other row on the board), and the final destination clock time
+    const cdB = countdown(transfer.leg2.eta - now);
+    const rowB = `<div class="row"><span class="chip" style="background:${esc(transfer.leg2.color)};color:${esc(transfer.leg2.text)}">${esc(transfer.leg2.k)}</span>` +
+      `<span class="dest">${esc(transfer.leg2.dest)}<small>change at ${esc(D.stations[transfer.via].name)}</small></span>` +
+      `<span class="trio"><span class="col"><i>DEPART</i><span class="dep">${fmtArr(transfer.leg2.eta)}</span></span>` +
+      `<span class="col"><i>LEAVE&nbsp;IN</i><span class="cd ${cdB.cls}">${cdB.label}</span></span>` +
+      `<span class="col"><i>ARRIVE</i><span class="arrb">${fmtArr(transfer.arr)}</span></span></span></div>`;
     $("rows").innerHTML =
       `<div class="empty" style="padding:10px 16px;text-align:left;color:var(--dim)">No direct line — connecting via ${esc(D.stations[transfer.via].name)}:</div>` +
-      legRow(transfer.leg1, "toward " + transfer.leg1.dest, "AT&nbsp;TRANSFER", transfer.leg1Arr) +
-      legRow(transfer.leg2, "change at " + D.stations[transfer.via].name + " · scheduled connection", "ARRIVE", transfer.arr);
+      rowA + rowB;
   } else {
     $("rows").innerHTML = destSt
       ? `<div class="empty">No trains to ${esc(destSt.name)} right now (checked direct + one transfer).<br>Clear the arrival station to see all departures.</div>`
