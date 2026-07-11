@@ -209,6 +209,49 @@ function reaches(r, o, d){
 const ptHM = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour12: false, hour: "2-digit", minute: "2-digit" });
 const fmtArr = ms => ptHM.format(new Date(ms)).replace(/^24/, "00");
 
+/* ---- one-transfer routing (BART only — Caltrain's Local/Limited/Express share one
+ *  corridor, no "wrong line" to change off of; a station pair with no direct BART line,
+ *  e.g. Antioch <-> Dublin/Pleasanton, otherwise showed nothing at all). stationLines[i]
+ *  is every line index that stops at station i, derived once from the travel-time table. ---- */
+const stationLines = D.stations.map(() => new Set());
+for(const [li, pairs] of Object.entries(D.tt))
+  for(const key of Object.keys(pairs)){ const [o, d] = key.split(">").map(Number);
+    stationLines[o].add(+li); stationLines[d].add(+li); }
+const TRANSFER_BUFFER_S = 90;   // minimum time to cross a BART platform for a same-station transfer
+/* best one-transfer route via any station serving both an origin line and a (different)
+ * destination line; leg 1 comes from the origin's already-fetched departures (live when
+ * available), leg 2 from the connecting station's own scheduled weekday departures — the
+ * same "real GTFS timetable as an honest estimate" approach used for BART Runner in
+ * sf-bay-transit-3d, re-derived independently here per this project's no-shared-code rule. */
+function findTransfer(originRows, oIdx, dIdx){
+  if(station.op !== "bart" || !destSt || destSt.op !== "bart") return null;
+  const oLines = stationLines[oIdx], dLines = stationLines[dIdx];
+  let best = null;
+  for(let via = 0; via < D.stations.length; via++){
+    if(via === oIdx || via === dIdx || D.stations[via].op !== "bart") continue;
+    const viaLines = stationLines[via];
+    let leg1 = null;
+    for(const r of originRows){ if(!oLines.has(r.li) || !viaLines.has(r.li)) continue;
+      if(!reaches(r, oIdx, via)) continue; if(!leg1 || r.eta < leg1.eta) leg1 = r; }
+    if(!leg1) continue;
+    const leg1Arr = leg1.eta + ttOf(leg1.li, oIdx, via) * 1000;
+    const readyAt = leg1Arr + TRANSFER_BUFFER_S * 1000;
+    const readySec = nowSeconds() + Math.round((readyAt - Date.now()) / 1000);
+    let leg2 = null;
+    for(const [t, li, di, term] of (D.sched[D.stations[via].id] || [])){
+      if(t < readySec) continue; if(li === leg1.li) continue;   // same line = ride-through, not a transfer
+      if(!dLines.has(li) || !viaLines.has(li)) continue;
+      if(!reaches({ li, term }, via, dIdx)) continue;
+      leg2 = { eta: readyAt + (t - readySec) * 1000, li, dest: D.dests[di], k: D.lines[li].k, color: D.lines[li].color, text: D.lines[li].text };
+      break;   // D.sched rows are time-sorted, so the first match is the earliest
+    }
+    if(!leg2) continue;
+    const arr = leg2.eta + ttOf(leg2.li, via, dIdx) * 1000;
+    if(!best || arr < best.arr) best = { via, leg1, leg2, leg1Arr, arr };
+  }
+  return best;
+}
+
 /* ---- live: BART ETD (direct client-side; CORS is open on api.bart.gov) ---- */
 async function fetchBart(st){
   const u = `${BART_API}?cmd=etd&orig=${st.code}&key=${BART_KEY}&json=y`;
@@ -294,40 +337,61 @@ function render(){
   $("clock").textContent = fmtClock(nowSeconds()) + " PT";
   if(!station) return;
   const now = Date.now();
-  let rows = (liveRows && liveRows.length) ? liveRows.filter(r => r.eta > now - 30000) : schedRows(station);
+  const originRows = (liveRows && liveRows.length) ? liveRows.filter(r => r.eta > now - 30000) : schedRows(station);
+  let rows = originRows, transfer = null;
   if(destSt){   // arrival mode: only trains that genuinely reach the arrival station, each with its arrival time
     const o = idxById[station.id], d = idxById[destSt.id];
-    rows = rows.filter(r => reaches(r, o, d)).map(r => ({ ...r, arr: r.eta + ttOf(r.li, o, d) * 1000 }));
+    rows = originRows.filter(r => reaches(r, o, d)).map(r => ({ ...r, arr: r.eta + ttOf(r.li, o, d) * 1000 }));
+    if(!rows.length) transfer = findTransfer(originRows, o, d);   // no direct line — try one BART transfer
   }
   rows = rows.slice().sort((a,b) => a.eta - b.eta).slice(0, MAX_ROWS);
   const live = liveRows && liveRows.length > 0;
   $("bhd-right").innerHTML = destSt ? "LEAVE&nbsp;IN&nbsp;·&nbsp;ARRIVE&nbsp;AT" : "DEPARTS&nbsp;IN";
-  /* hero: the next qualifying train's arrival, huge — "you will be at DALY CITY at 00:20" */
+  /* hero: the next qualifying train's (or transfer's) arrival, huge — "you will be at DALY CITY at 00:20" */
   const r0 = destSt && rows[0];
-  $("hero").classList.toggle("show", !!r0);
+  $("hero").classList.toggle("show", !!(r0 || transfer));
   if(r0){
     const cd0 = countdown(r0.eta - now);
     $("hero-lbl").textContent = "→ YOU ARRIVE " + destSt.name.toUpperCase();
     $("hero-when").textContent = fmtArr(r0.arr);
     $("hero-sub").innerHTML = `${esc(r0.k)} · leave in <b class="${cd0.cls}">${cd0.label}</b>${r0.sched ? " · scheduled" : " · live"}`;
+  } else if(transfer){
+    const cd0 = countdown(transfer.leg1.eta - now);
+    $("hero-lbl").textContent = "→ YOU ARRIVE " + destSt.name.toUpperCase();
+    $("hero-when").textContent = fmtArr(transfer.arr);
+    $("hero-sub").innerHTML = `1 transfer via ${esc(D.stations[transfer.via].name)} · leave in <b class="${cd0.cls}">${cd0.label}</b>`;
   }
-  $("rows").innerHTML = rows.length ? rows.map((r, i) => {
-    const cd = countdown(r.eta - now);
-    /* arrival mode: DEP + ARR as two labelled equal-size columns (the per-row LIVE/SCHED
-     * tag moves into the note line — the times need the width more than the tag does) */
-    const right = r.arr
-      ? `<span class="duo"><span class="col"><i>LEAVE&nbsp;IN</i><span class="cd ${cd.cls}">${cd.label}</span></span>` +
-        `<span class="col"><i>ARRIVE</i><span class="arrb">${fmtArr(r.arr)}</span></span></span>`
-      : `<span class="src ${r.sched ? "" : "live"}">${r.sched ? "SCHED" : "LIVE"}</span>` +
-        `<span class="cd-wrap"><span class="cd ${cd.cls}">${cd.label}</span></span>`;
-    const note = (r.arr ? (r.sched ? "scheduled" : "live") + (r.note ? " · " : "") : "") + (r.note || "");
-    return `<div class="row${r.arr && i === 0 ? " next" : ""}">` +
-      `<span class="chip" style="background:${esc(r.color)};color:${esc(r.text)}">${esc(r.k)}</span>` +
-      `<span class="dest">${esc(r.dest)}${note ? `<small>${esc(note)}</small>` : ""}</span>` +
-      right + `</div>`;
-  }).join("") : destSt
-    ? `<div class="empty">No direct trains to ${esc(destSt.name)} right now.<br>Clear the arrival station to see all departures.</div>`
-    : `<div class="empty">No more departures today at this station.<br>(Weekday schedule — service resumes ~5 am Pacific.)</div>`;
+  if(rows.length){
+    $("rows").innerHTML = rows.map((r, i) => {
+      const cd = countdown(r.eta - now);
+      /* arrival mode: DEP + ARR as two labelled equal-size columns (the per-row LIVE/SCHED
+       * tag moves into the note line — the times need the width more than the tag does) */
+      const right = r.arr
+        ? `<span class="duo"><span class="col"><i>LEAVE&nbsp;IN</i><span class="cd ${cd.cls}">${cd.label}</span></span>` +
+          `<span class="col"><i>ARRIVE</i><span class="arrb">${fmtArr(r.arr)}</span></span></span>`
+        : `<span class="src ${r.sched ? "" : "live"}">${r.sched ? "SCHED" : "LIVE"}</span>` +
+          `<span class="cd-wrap"><span class="cd ${cd.cls}">${cd.label}</span></span>`;
+      const note = (r.arr ? (r.sched ? "scheduled" : "live") + (r.note ? " · " : "") : "") + (r.note || "");
+      return `<div class="row${r.arr && i === 0 ? " next" : ""}">` +
+        `<span class="chip" style="background:${esc(r.color)};color:${esc(r.text)}">${esc(r.k)}</span>` +
+        `<span class="dest">${esc(r.dest)}${note ? `<small>${esc(note)}</small>` : ""}</span>` +
+        right + `</div>`;
+    }).join("");
+  } else if(transfer){
+    const legRow = (leg, label, whenLbl, whenMs) => { const cd = countdown(leg.eta - now);
+      return `<div class="row"><span class="chip" style="background:${esc(leg.color)};color:${esc(leg.text)}">${esc(leg.k)}</span>` +
+        `<span class="dest">${esc(leg.dest)}<small>${esc(label)}</small></span>` +
+        `<span class="duo"><span class="col"><i>LEAVE&nbsp;IN</i><span class="cd ${cd.cls}">${cd.label}</span></span>` +
+        `<span class="col"><i>${whenLbl}</i><span class="arrb">${fmtArr(whenMs)}</span></span></span></div>`; };
+    $("rows").innerHTML =
+      `<div class="empty" style="padding:10px 16px;text-align:left;color:var(--dim)">No direct line — connecting via ${esc(D.stations[transfer.via].name)}:</div>` +
+      legRow(transfer.leg1, "toward " + transfer.leg1.dest, "AT&nbsp;TRANSFER", transfer.leg1Arr) +
+      legRow(transfer.leg2, "change at " + D.stations[transfer.via].name + " · scheduled connection", "ARRIVE", transfer.arr);
+  } else {
+    $("rows").innerHTML = destSt
+      ? `<div class="empty">No trains to ${esc(destSt.name)} right now (checked direct + one transfer).<br>Clear the arrival station to see all departures.</div>`
+      : `<div class="empty">No more departures today at this station.<br>(Weekday schedule — service resumes ~5 am Pacific.)</div>`;
+  }
   $("status").innerHTML =
     (liveErr ? `<span class="err">${esc(liveErr)}</span> · ` : live ? "live data · " : "official weekday schedule · ") +
     "updated " + fmtClock(nowSeconds()) + " PT";
