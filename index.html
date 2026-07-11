@@ -66,7 +66,12 @@
   .cd{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.5px}
   .cd.green{color:var(--green)} .cd.amber{color:var(--warn)}
   .cd.red{color:var(--red);animation:blink .85s steps(2,start) infinite}
-  .arr{font-size:10.5px;color:var(--amber);letter-spacing:.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+  /* arrival mode: DEP + ARR as two labelled, equal-weight time columns */
+  .duo{flex:0 0 auto;display:flex;gap:14px}
+  .duo .col{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+  .duo .col i{font-style:normal;font-size:8px;letter-spacing:1.5px;color:var(--dim)}
+  .duo .arrb{font-size:19px;font-weight:700;color:var(--amber);font-variant-numeric:tabular-nums;letter-spacing:.5px}
+  .row.next{background:rgba(255,181,49,.06);box-shadow:inset 3px 0 0 var(--amber)}
   @keyframes blink{50%{opacity:.2}}
   .empty{padding:34px 16px;text-align:center;color:var(--dim);font-size:12.5px;line-height:1.7}
 
@@ -277,14 +282,21 @@ function render(){
   }
   rows = rows.slice().sort((a,b) => a.eta - b.eta).slice(0, MAX_ROWS);
   const live = liveRows && liveRows.length > 0;
-  $("bhd-right").innerHTML = destSt ? "DEPARTS&nbsp;·&nbsp;ARRIVES" : "DEPARTS&nbsp;IN";
-  $("rows").innerHTML = rows.length ? rows.map(r => {
+  $("bhd-right").innerHTML = destSt ? "LEAVE&nbsp;IN&nbsp;·&nbsp;ARRIVE&nbsp;AT" : "DEPARTS&nbsp;IN";
+  $("rows").innerHTML = rows.length ? rows.map((r, i) => {
     const cd = countdown(r.eta - now);
-    return `<div class="row">` +
+    /* arrival mode: DEP + ARR as two labelled equal-size columns (the per-row LIVE/SCHED
+     * tag moves into the note line — the times need the width more than the tag does) */
+    const right = r.arr
+      ? `<span class="duo"><span class="col"><i>LEAVE&nbsp;IN</i><span class="cd ${cd.cls}">${cd.label}</span></span>` +
+        `<span class="col"><i>ARRIVE</i><span class="arrb">${fmtArr(r.arr)}</span></span></span>`
+      : `<span class="src ${r.sched ? "" : "live"}">${r.sched ? "SCHED" : "LIVE"}</span>` +
+        `<span class="cd-wrap"><span class="cd ${cd.cls}">${cd.label}</span></span>`;
+    const note = (r.arr ? (r.sched ? "scheduled" : "live") + (r.note ? " · " : "") : "") + (r.note || "");
+    return `<div class="row${r.arr && i === 0 ? " next" : ""}">` +
       `<span class="chip" style="background:${esc(r.color)};color:${esc(r.text)}">${esc(r.k)}</span>` +
-      `<span class="dest">${esc(r.dest)}${r.note ? `<small>${esc(r.note)}</small>` : ""}</span>` +
-      `<span class="src ${r.sched ? "" : "live"}">${r.sched ? "SCHED" : "LIVE"}</span>` +
-      `<span class="cd-wrap"><span class="cd ${cd.cls}">${cd.label}</span>${r.arr ? `<span class="arr">→&nbsp;${fmtArr(r.arr)}</span>` : ""}</span></div>`;
+      `<span class="dest">${esc(r.dest)}${note ? `<small>${esc(note)}</small>` : ""}</span>` +
+      right + `</div>`;
   }).join("") : destSt
     ? `<div class="empty">No direct trains to ${esc(destSt.name)} right now.<br>Clear the arrival station to see all departures.</div>`
     : `<div class="empty">No more departures today at this station.<br>(Weekday schedule — service resumes ~5 am Pacific.)</div>`;
