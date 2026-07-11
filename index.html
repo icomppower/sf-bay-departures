@@ -38,8 +38,8 @@
 
   /* ---------- arrival (destination) bar ---------- */
   #destbar{display:flex;gap:8px;margin-top:-4px}
-  #dest-btn{flex:1;display:flex;align-items:center;gap:9px;background:none;border:1px dashed var(--edge);
-    border-radius:10px;padding:9px 14px;color:var(--dim);font:inherit;font-size:13px;cursor:pointer;text-align:left}
+  #dest-btn{flex:1;display:flex;align-items:center;gap:9px;background:none;border:1px dashed rgba(255,181,49,.45);
+    border-radius:10px;padding:9px 14px;color:var(--amber);font:inherit;font-size:13px;cursor:pointer;text-align:left}
   #dest-btn.set{background:var(--panel);border-style:solid;color:var(--ink)}
   #dest-btn:active{background:#1a1f29}
   #dest-btn .arrow{color:var(--amber);flex:0 0 auto}
@@ -66,12 +66,24 @@
   .cd{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.5px}
   .cd.green{color:var(--green)} .cd.amber{color:var(--warn)}
   .cd.red{color:var(--red);animation:blink .85s steps(2,start) infinite}
-  /* arrival mode: DEP + ARR as two labelled, equal-weight time columns */
-  .duo{flex:0 0 auto;display:flex;gap:14px}
+  /* arrival mode: the ARRIVE column is the star — bigger than the countdown */
+  .duo{flex:0 0 auto;display:flex;gap:14px;align-items:flex-end}
   .duo .col{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
   .duo .col i{font-style:normal;font-size:8px;letter-spacing:1.5px;color:var(--dim)}
-  .duo .arrb{font-size:19px;font-weight:700;color:var(--amber);font-variant-numeric:tabular-nums;letter-spacing:.5px}
+  .duo .cd{font-size:15px}
+  .duo .arrb{font-size:23px;font-weight:700;color:var(--amber);font-variant-numeric:tabular-nums;letter-spacing:.5px}
   .row.next{background:rgba(255,181,49,.06);box-shadow:inset 3px 0 0 var(--amber)}
+
+  /* ---------- hero banner: the answer, huge (arrival mode only) ---------- */
+  #hero{display:none;align-items:center;justify-content:space-between;gap:12px;padding:13px 14px;
+    border-bottom:1px solid var(--edge);background:rgba(255,181,49,.08)}
+  #hero.show{display:flex}
+  #hero .lbl{font-size:11px;letter-spacing:2px;color:var(--amber);font-weight:700}
+  #hero .sub{font-size:11px;color:var(--dim);margin-top:4px;letter-spacing:.5px}
+  #hero .sub b{font-weight:700}
+  #hero .sub b.green{color:var(--green)} #hero .sub b.amber{color:var(--warn)}
+  #hero .sub b.red{color:var(--red);animation:blink .85s steps(2,start) infinite}
+  #hero .when{font-size:42px;font-weight:700;color:var(--amber);font-variant-numeric:tabular-nums;line-height:1;letter-spacing:1px}
   @keyframes blink{50%{opacity:.2}}
   .empty{padding:34px 16px;text-align:center;color:var(--dim);font-size:12.5px;line-height:1.7}
 
@@ -108,12 +120,16 @@
     <button id="geo-btn" title="Nearest station" aria-label="Use nearest station">📍</button>
   </div>
   <div id="destbar">
-    <button id="dest-btn" aria-label="Choose arrival station"><span class="arrow">→</span><span class="nm">Arrival station (optional)</span><span class="ch">▾</span></button>
+    <button id="dest-btn" aria-label="Choose arrival station"><span class="arrow">→</span><span class="nm">Set arrival station — see when you arrive</span><span class="ch">▾</span></button>
     <button id="dest-clear" title="Clear arrival station" aria-label="Clear arrival station" hidden>✕</button>
   </div>
 
   <div id="board">
     <div class="bhd"><span>LINE&nbsp;/&nbsp;DESTINATION</span><span id="bhd-right">DEPARTS&nbsp;IN</span></div>
+    <div id="hero">
+      <div><div class="lbl" id="hero-lbl"></div><div class="sub" id="hero-sub"></div></div>
+      <div class="when" id="hero-when"></div>
+    </div>
     <div id="rows"><div class="empty">Pick a station to see departures.</div></div>
   </div>
 
@@ -283,6 +299,15 @@ function render(){
   rows = rows.slice().sort((a,b) => a.eta - b.eta).slice(0, MAX_ROWS);
   const live = liveRows && liveRows.length > 0;
   $("bhd-right").innerHTML = destSt ? "LEAVE&nbsp;IN&nbsp;·&nbsp;ARRIVE&nbsp;AT" : "DEPARTS&nbsp;IN";
+  /* hero: the next qualifying train's arrival, huge — "you will be at DALY CITY at 00:20" */
+  const r0 = destSt && rows[0];
+  $("hero").classList.toggle("show", !!r0);
+  if(r0){
+    const cd0 = countdown(r0.eta - now);
+    $("hero-lbl").textContent = "→ YOU ARRIVE " + destSt.name.toUpperCase();
+    $("hero-when").textContent = fmtArr(r0.arr);
+    $("hero-sub").innerHTML = `${esc(r0.k)} · leave in <b class="${cd0.cls}">${cd0.label}</b>${r0.sched ? " · scheduled" : " · live"}`;
+  }
   $("rows").innerHTML = rows.length ? rows.map((r, i) => {
     const cd = countdown(r.eta - now);
     /* arrival mode: DEP + ARR as two labelled equal-size columns (the per-row LIVE/SCHED
@@ -321,7 +346,7 @@ function setStation(s, save = true){
 }
 function setDest(s, save = true){
   destSt = s;
-  $("dest-btn").querySelector(".nm").textContent = s ? "Arrival: " + s.name : "Arrival station (optional)";
+  $("dest-btn").querySelector(".nm").textContent = s ? "Arrival: " + s.name : "Set arrival station — see when you arrive";
   $("dest-btn").classList.toggle("set", !!s);
   $("dest-clear").hidden = !s;
   if(save){ try{ s ? localStorage.setItem(LS_DEST, s.id) : localStorage.removeItem(LS_DEST); }catch(e){} }
