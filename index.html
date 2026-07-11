@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#0a0c10" />
+<title>Bay Departures 灣區班次 — BART + Caltrain departure board</title>
+<meta name="description" content="A fast, phone-first live departure board for BART and Caltrain. Pick a station, see real countdowns — no 3D, no heavy tiles, loads instantly." />
+<meta property="og:title" content="Bay Departures 灣區班次" />
+<meta property="og:description" content="Live BART + Caltrain departure board — the mobile-lite companion to the SF Bay Area 3D map." />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230a0c10'/><rect y='3' width='16' height='2.6' fill='%23ffb531'/><rect y='7' width='16' height='2.6' fill='%23ffb531' opacity='.65'/><rect y='11' width='16' height='2.6' fill='%23ffb531' opacity='.35'/></svg>" />
+<style>
+  :root{
+    --bg:#0a0c10; --panel:#12151c; --edge:#242a36; --ink:#e8ecf4; --dim:#8b94a7;
+    --amber:#ffb531; --green:#43d675; --warn:#ffc44d; --red:#ff5a5a;
+    --mono:"SF Mono","Consolas","Roboto Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+  html,body{background:var(--bg);color:var(--ink);font-family:var(--mono);min-height:100%}
+  body{max-width:640px;margin:0 auto;padding:14px 12px 20px;display:flex;flex-direction:column;gap:12px}
+
+  /* ---------- header ---------- */
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:2px 2px 0}
+  header h1{font-size:15px;letter-spacing:3px;color:var(--amber);font-weight:700;white-space:nowrap}
+  header h1 small{display:block;font-size:9px;letter-spacing:2px;color:var(--dim);font-weight:400;margin-top:2px}
+  #clock{font-size:12px;color:var(--dim);letter-spacing:1px;font-variant-numeric:tabular-nums}
+
+  /* ---------- station bar ---------- */
+  #stationbar{display:flex;gap:8px}
+  #station-btn{flex:1;display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--edge);
+    border-radius:10px;padding:12px 14px;color:var(--ink);font:inherit;font-size:16px;cursor:pointer;text-align:left}
+  #station-btn:active{background:#1a1f29}
+  #station-btn .op{font-size:9px;letter-spacing:1px;padding:2.5px 6px;border-radius:4px;border:1px solid var(--edge);color:var(--dim);flex:0 0 auto}
+  #station-btn .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #station-btn .ch{color:var(--dim);font-size:11px}
+  #geo-btn{flex:0 0 auto;width:46px;background:var(--panel);border:1px solid var(--edge);border-radius:10px;color:var(--amber);font-size:17px;cursor:pointer}
+  #geo-btn:active{background:#1a1f29}
+
+  /* ---------- board ---------- */
+  #board{background:var(--panel);border:1px solid var(--edge);border-radius:12px;overflow:hidden;min-height:220px}
+  .bhd{display:flex;justify-content:space-between;padding:9px 14px;font-size:9.5px;letter-spacing:2px;color:var(--dim);border-bottom:1px solid var(--edge)}
+  .row{display:flex;align-items:center;gap:10px;padding:11px 14px;border-bottom:1px solid rgba(36,42,54,.6);animation:flapin .28s ease}
+  .row:last-child{border-bottom:none}
+  @keyframes flapin{from{transform:translateY(-4px);opacity:0}to{transform:none;opacity:1}}
+  .chip{flex:0 0 auto;min-width:54px;text-align:center;font-size:10.5px;font-weight:700;letter-spacing:.5px;
+    padding:4px 7px;border-radius:5px;text-transform:uppercase}
+  .dest{flex:1;min-width:0;font-size:14px;letter-spacing:.4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:uppercase}
+  .dest small{display:block;font-size:9px;color:var(--dim);letter-spacing:1px;margin-top:2px;text-transform:none}
+  .src{flex:0 0 auto;font-size:8.5px;letter-spacing:1px;color:var(--dim)}
+  .src.live{color:var(--green)}
+  .src.live::before{content:"●";margin-right:3px;animation:pulse 1.6s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  .cd{flex:0 0 auto;width:72px;text-align:right;font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.5px}
+  .cd.green{color:var(--green)} .cd.amber{color:var(--warn)}
+  .cd.red{color:var(--red);animation:blink .85s steps(2,start) infinite}
+  @keyframes blink{50%{opacity:.2}}
+  .empty{padding:34px 16px;text-align:center;color:var(--dim);font-size:12.5px;line-height:1.7}
+
+  #status{font-size:9.5px;letter-spacing:1px;color:var(--dim);text-align:center;line-height:1.7}
+  #status .err{color:var(--warn)}
+
+  footer{margin-top:auto;padding-top:6px;text-align:center;font-size:10px;color:var(--dim);line-height:1.9}
+  footer a{color:var(--amber);text-decoration:none;border-bottom:1px solid rgba(255,181,49,.4)}
+  footer .fine{font-size:8.5px;letter-spacing:.3px;opacity:.75}
+
+  /* ---------- station picker overlay ---------- */
+  #picker{position:fixed;inset:0;background:rgba(6,8,12,.97);z-index:10;display:none;flex-direction:column;padding:14px 12px}
+  #picker.open{display:flex}
+  #picker .phd{display:flex;gap:8px;max-width:640px;width:100%;margin:0 auto 10px}
+  #search{flex:1;background:var(--panel);border:1px solid var(--edge);border-radius:10px;padding:12px 14px;color:var(--ink);font:inherit;font-size:16px;outline:none}
+  #search:focus{border-color:var(--amber)}
+  #picker-close{flex:0 0 auto;width:46px;background:var(--panel);border:1px solid var(--edge);border-radius:10px;color:var(--dim);font-size:16px;cursor:pointer}
+  #stations{flex:1;overflow-y:auto;max-width:640px;width:100%;margin:0 auto;border:1px solid var(--edge);border-radius:12px;background:var(--panel)}
+  .st{display:flex;align-items:center;gap:10px;width:100%;padding:13px 14px;background:none;border:none;border-bottom:1px solid rgba(36,42,54,.6);
+    color:var(--ink);font:inherit;font-size:15px;cursor:pointer;text-align:left}
+  .st:active{background:#1a1f29}
+  .st .op{font-size:9px;letter-spacing:1px;padding:2.5px 6px;border-radius:4px;border:1px solid var(--edge);color:var(--dim);flex:0 0 auto;min-width:44px;text-align:center}
+  .op.bart{color:#39b5e8;border-color:#39b5e844} .op.ct{color:#ff6a6a;border-color:#ff6a6a44}
+</style>
+</head>
+<body>
+  <header>
+    <h1>BAY DEPARTURES<small>灣區班次 · BART + CALTRAIN</small></h1>
+    <div id="clock">--:--:--</div>
+  </header>
+
+  <div id="stationbar">
+    <button id="station-btn" aria-label="Choose station"><span class="op"></span><span class="nm">Choose a station…</span><span class="ch">▾</span></button>
+    <button id="geo-btn" title="Nearest station" aria-label="Use nearest station">📍</button>
+  </div>
+
+  <div id="board">
+    <div class="bhd"><span>LINE&nbsp;/&nbsp;DESTINATION</span><span>DEPARTS&nbsp;IN</span></div>
+    <div id="rows"><div class="empty">Pick a station to see departures.</div></div>
+  </div>
+
+  <div id="status"></div>
+
+  <footer>
+    <div>Prefer the interactive 3D map? <a href="https://icomppower.github.io/sf-bay-transit-3d" rel="noopener">SF Bay Area 3D →</a></div>
+    <div class="fine">Live data: BART (api.bart.gov) · Caltrain via 511.org. Schedule fallback: official GTFS.<br>
+      Built by <a href="https://www.linkedin.com/in/icomppower" rel="noopener">Johnny Lai</a> · <a href="https://github.com/icomppower" rel="noopener">icomppower</a></div>
+  </footer>
+
+  <div id="picker">
+    <div class="phd">
+      <input id="search" type="search" placeholder="Search stations…" autocomplete="off" />
+      <button id="picker-close" aria-label="Close">✕</button>
+    </div>
+    <div id="stations"></div>
+  </div>
+
+<script src="data.js"></script>
+<script>
+(() => {
+"use strict";
+const D = window.BOARD_DATA;
+const $ = id => document.getElementById(id);
+const PROXY = "https://sf-bay-transit-proxy.vercel.app/api/caltrain-live";
+const BART_API = "https://api.bart.gov/api/etd.aspx";
+const BART_KEY = "MW9S-E7SL-26DU-VV8V";   // BART's long-standing public demo key
+const LS_KEY = "bay_departures_station";
+const MAX_ROWS = 10;
+
+/* ---- Pacific clock: the schedule is in America/Los_Angeles seconds-since-midnight,
+ *  and a visitor anywhere in the world must see BART's clock, not their own. ---- */
+const tzFmt = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" });
+function nowSeconds(){
+  const p = tzFmt.formatToParts(new Date()), g = t => +p.find(x => x.type === t).value;
+  return (g("hour") % 24) * 3600 + g("minute") * 60 + g("second");
+}
+const fmtClock = s => [s/3600, s/60 % 60, s % 60].map(v => String(Math.floor(v)).padStart(2, "0")).join(":");
+
+/* ---- countdown urgency bands: green > 5 min, amber 2–5, flashing red < 2 ---- */
+function countdown(ms){
+  const s = Math.max(0, Math.round(ms / 1000));
+  const label = s >= 3600 ? Math.floor(s/3600) + "h" + String(Math.floor(s/60) % 60).padStart(2, "0")
+              : s < 30 ? "DUE"
+              : Math.floor(s/60) + ":" + String(s % 60).padStart(2, "0");
+  return { s, label, cls: s > 300 ? "green" : s >= 120 ? "amber" : "red" };
+}
+
+/* ---- state ---- */
+let station = null;          // entry from D.stations
+let liveRows = null;         // [{k, color, text, dest, note, eta(ms epoch)}] or null when live unavailable
+let liveErr = "";            // human-readable live-source note for the status line
+let fetchTimer = null;
+
+const byId = {}; D.stations.forEach(s => byId[s.id] = s);
+const lineByOpK = {}; D.lines.forEach(l => lineByOpK[l.op + ":" + l.k.toLowerCase()] = l);
+
+/* ---- live: BART ETD (direct client-side; CORS is open on api.bart.gov) ---- */
+async function fetchBart(st){
+  const u = `${BART_API}?cmd=etd&orig=${st.code}&key=${BART_KEY}&json=y`;
+  const r = await fetch(u); if(!r.ok) throw new Error("BART API " + r.status);
+  const j = await r.json();
+  const etds = j?.root?.station?.[0]?.etd || [];
+  const now = Date.now(), rows = [];
+  for(const e of etds) for(const est of (e.estimate || [])){
+    if(est.cancelflag === "1") continue;
+    const min = est.minutes === "Leaving" ? 0 : parseInt(est.minutes, 10);
+    if(Number.isNaN(min)) continue;
+    const name = (est.color || "").toLowerCase();
+    rows.push({ k: name ? name[0].toUpperCase() + name.slice(1) : "BART",
+      color: est.hexcolor || "#8b94a7", text: pickText(est.hexcolor),
+      dest: e.destination, note: "Platform " + est.platform + (est.length ? " · " + est.length + " cars" : ""),
+      eta: now + min * 60000 });
+  }
+  return rows;
+}
+const pickText = hex => { if(!hex) return "#000";
+  const n = parseInt(hex.replace("#",""), 16), lum = 0.299*((n>>16)&255) + 0.587*((n>>8)&255) + 0.114*(n&255);
+  return lum > 140 ? "#000" : "#fff"; };
+
+/* ---- live: Caltrain via the deployed 511 proxy (one call per platform code) ---- */
+async function fetchCaltrain(st){
+  const now = Date.now(), rows = [];
+  for(const code of st.codes){
+    const r = await fetch(`${PROXY}?stopCode=${code}`); if(!r.ok) throw new Error("proxy " + r.status);
+    const j = await r.json();
+    const visits = j?.ServiceDelivery?.StopMonitoringDelivery?.MonitoredStopVisit || [];
+    for(const v of visits){
+      const mvj = v.MonitoredVehicleJourney || {}, call = mvj.MonitoredCall || {};
+      const t = call.ExpectedDepartureTime || call.ExpectedArrivalTime || call.AimedDepartureTime || call.AimedArrivalTime;
+      if(!t) continue;
+      const eta = Date.parse(t); if(!(eta > now - 60000)) continue;
+      const lk = (mvj.LineRef || "").replace(/\s*Weekday$/i, "");
+      const line = lineByOpK["ct:" + lk.toLowerCase()];
+      rows.push({ k: lk || "Caltrain", color: line ? line.color : "#ce202f", text: line ? line.text : "#fff",
+        dest: (mvj.DestinationName || "").replace(/\s*Caltrain Station\s*(North|South)bound$/i, "").replace(/\s*(North|South)bound$/i, ""),
+        note: mvj.DirectionRef === "N" ? "Northbound" : mvj.DirectionRef === "S" ? "Southbound" : "",
+        eta });
+    }
+  }
+  return rows;
+}
+
+/* ---- scheduled fallback rows (official weekday GTFS, Pacific clock) ---- */
+function schedRows(st){
+  const list = D.sched[st.id] || [], now = nowSeconds(), t0 = Date.now();
+  const out = [];
+  for(const [t, li, di] of list){
+    if(t < now) continue;
+    const L = D.lines[li];
+    out.push({ k: L.k, color: L.color, text: L.text, dest: D.dests[di], note: "", eta: t0 + (t - now) * 1000, sched: true });
+    if(out.length >= MAX_ROWS) break;
+  }
+  return out;
+}
+
+/* ---- fetch cycle: BART every 30 s, Caltrain every 60 s (511 token is rate-limited) ---- */
+async function refresh(){
+  if(!station) return;
+  try{
+    liveRows = station.op === "bart" ? await fetchBart(station) : await fetchCaltrain(station);
+    liveErr = "";
+  }catch(e){ liveRows = null; liveErr = (station.op === "bart" ? "BART" : "Caltrain") + " live unavailable — showing schedule"; }
+  render();
+}
+function armFetch(){
+  clearInterval(fetchTimer);
+  refresh();
+  fetchTimer = setInterval(refresh, station && station.op === "bart" ? 30000 : 60000);
+}
+
+/* ---- render ---- */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;" }[c]));
+function render(){
+  $("clock").textContent = fmtClock(nowSeconds()) + " PT";
+  if(!station) return;
+  const now = Date.now();
+  let rows = (liveRows && liveRows.length) ? liveRows.filter(r => r.eta > now - 30000) : schedRows(station);
+  rows = rows.slice().sort((a,b) => a.eta - b.eta).slice(0, MAX_ROWS);
+  const live = liveRows && liveRows.length > 0;
+  $("rows").innerHTML = rows.length ? rows.map(r => {
+    const cd = countdown(r.eta - now);
+    return `<div class="row">` +
+      `<span class="chip" style="background:${esc(r.color)};color:${esc(r.text)}">${esc(r.k)}</span>` +
+      `<span class="dest">${esc(r.dest)}${r.note ? `<small>${esc(r.note)}</small>` : ""}</span>` +
+      `<span class="src ${r.sched ? "" : "live"}">${r.sched ? "SCHED" : "LIVE"}</span>` +
+      `<span class="cd ${cd.cls}">${cd.label}</span></div>`;
+  }).join("") : `<div class="empty">No more departures today at this station.<br>(Weekday schedule — service resumes ~5 am Pacific.)</div>`;
+  $("status").innerHTML =
+    (liveErr ? `<span class="err">${esc(liveErr)}</span> · ` : live ? "live data · " : "official weekday schedule · ") +
+    "updated " + fmtClock(nowSeconds()) + " PT";
+}
+/* countdown tick: cheap re-render every second (rows are tiny) */
+setInterval(render, 1000);
+
+/* ---- station selection ---- */
+function setStation(s, save = true){
+  station = s;
+  $("station-btn").querySelector(".nm").textContent = s.name;
+  const op = $("station-btn").querySelector(".op");
+  op.textContent = s.op === "bart" ? "BART" : "CALTRAIN"; op.className = "op " + s.op;
+  if(save){ try{ localStorage.setItem(LS_KEY, s.id); }catch(e){} }
+  liveRows = null; liveErr = "";
+  $("rows").innerHTML = `<div class="empty">Loading departures…</div>`;
+  armFetch();
+}
+
+/* ---- picker overlay ---- */
+const sorted = D.stations.slice().sort((a,b) => a.op.localeCompare(b.op) || a.name.localeCompare(b.name));
+function paintList(q = ""){
+  const needle = q.trim().toLowerCase();
+  const hits = sorted.filter(s => !needle || s.name.toLowerCase().includes(needle));
+  $("stations").innerHTML = hits.map(s =>
+    `<button class="st" data-id="${esc(s.id)}"><span class="op ${s.op}">${s.op === "bart" ? "BART" : "CT"}</span>${esc(s.name)}</button>`
+  ).join("") || `<div class="empty">No station matches “${esc(q)}”.</div>`;
+}
+$("station-btn").onclick = () => { $("picker").classList.add("open"); paintList(); $("search").value = ""; $("search").focus(); };
+$("picker-close").onclick = () => $("picker").classList.remove("open");
+$("search").oninput = e => paintList(e.target.value);
+$("stations").onclick = e => { const b = e.target.closest(".st"); if(!b) return;
+  setStation(byId[b.dataset.id]); $("picker").classList.remove("open"); };
+
+/* ---- nearest station (explicit tap only — never auto-prompt for location) ---- */
+$("geo-btn").onclick = () => {
+  if(!navigator.geolocation) return;
+  $("geo-btn").textContent = "…";
+  navigator.geolocation.getCurrentPosition(pos => {
+    const { latitude: la, longitude: lo } = pos.coords;
+    let best = null, bd = 1e9;
+    for(const s of D.stations){
+      const dLat = (s.lat - la) * 111.32, dLon = (s.lon - lo) * 111.32 * Math.cos(la * Math.PI / 180);
+      const d = dLat*dLat + dLon*dLon; if(d < bd){ bd = d; best = s; }
+    }
+    $("geo-btn").textContent = "📍";
+    if(best) setStation(best);
+  }, () => { $("geo-btn").textContent = "📍"; }, { timeout: 8000 });
+};
+
+/* ---- boot: restore last station, else default to Embarcadero ---- */
+let saved = null; try{ saved = localStorage.getItem(LS_KEY); }catch(e){}
+setStation(byId[saved] || byId["bart:EMBR"] || sorted[0], false);
+})();
+</script>
+</body>
+</html>
