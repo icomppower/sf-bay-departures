@@ -62,9 +62,11 @@
   .src.live{color:var(--green)}
   .src.live::before{content:"●";margin-right:3px;animation:pulse 1.6s infinite}
   @keyframes pulse{50%{opacity:.35}}
-  .cd{flex:0 0 auto;width:72px;text-align:right;font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.5px}
+  .cd-wrap{flex:0 0 auto;min-width:72px;display:flex;flex-direction:column;align-items:flex-end;gap:1px}
+  .cd{font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.5px}
   .cd.green{color:var(--green)} .cd.amber{color:var(--warn)}
   .cd.red{color:var(--red);animation:blink .85s steps(2,start) infinite}
+  .arr{font-size:10.5px;color:var(--amber);letter-spacing:.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
   @keyframes blink{50%{opacity:.2}}
   .empty{padding:34px 16px;text-align:center;color:var(--dim);font-size:12.5px;line-height:1.7}
 
@@ -106,7 +108,7 @@
   </div>
 
   <div id="board">
-    <div class="bhd"><span>LINE&nbsp;/&nbsp;DESTINATION</span><span>DEPARTS&nbsp;IN</span></div>
+    <div class="bhd"><span>LINE&nbsp;/&nbsp;DESTINATION</span><span id="bhd-right">DEPARTS&nbsp;IN</span></div>
     <div id="rows"><div class="empty">Pick a station to see departures.</div></div>
   </div>
 
@@ -275,14 +277,14 @@ function render(){
   }
   rows = rows.slice().sort((a,b) => a.eta - b.eta).slice(0, MAX_ROWS);
   const live = liveRows && liveRows.length > 0;
+  $("bhd-right").innerHTML = destSt ? "DEPARTS&nbsp;·&nbsp;ARRIVES" : "DEPARTS&nbsp;IN";
   $("rows").innerHTML = rows.length ? rows.map(r => {
     const cd = countdown(r.eta - now);
-    const note = (r.arr ? "arr " + esc(destSt.name) + " " + fmtArr(r.arr) : "") + (r.arr && r.note ? " · " : "") + esc(r.note || "");
     return `<div class="row">` +
       `<span class="chip" style="background:${esc(r.color)};color:${esc(r.text)}">${esc(r.k)}</span>` +
-      `<span class="dest">${esc(r.dest)}${note ? `<small>${note}</small>` : ""}</span>` +
+      `<span class="dest">${esc(r.dest)}${r.note ? `<small>${esc(r.note)}</small>` : ""}</span>` +
       `<span class="src ${r.sched ? "" : "live"}">${r.sched ? "SCHED" : "LIVE"}</span>` +
-      `<span class="cd ${cd.cls}">${cd.label}</span></div>`;
+      `<span class="cd-wrap"><span class="cd ${cd.cls}">${cd.label}</span>${r.arr ? `<span class="arr">→&nbsp;${fmtArr(r.arr)}</span>` : ""}</span></div>`;
   }).join("") : destSt
     ? `<div class="empty">No direct trains to ${esc(destSt.name)} right now.<br>Clear the arrival station to see all departures.</div>`
     : `<div class="empty">No more departures today at this station.<br>(Weekday schedule — service resumes ~5 am Pacific.)</div>`;
