@@ -36,6 +36,18 @@
   #geo-btn{flex:0 0 auto;width:46px;background:var(--panel);border:1px solid var(--edge);border-radius:10px;color:var(--amber);font-size:17px;cursor:pointer}
   #geo-btn:active{background:#1a1f29}
 
+  /* ---------- arrival (destination) bar ---------- */
+  #destbar{display:flex;gap:8px;margin-top:-4px}
+  #dest-btn{flex:1;display:flex;align-items:center;gap:9px;background:none;border:1px dashed var(--edge);
+    border-radius:10px;padding:9px 14px;color:var(--dim);font:inherit;font-size:13px;cursor:pointer;text-align:left}
+  #dest-btn.set{background:var(--panel);border-style:solid;color:var(--ink)}
+  #dest-btn:active{background:#1a1f29}
+  #dest-btn .arrow{color:var(--amber);flex:0 0 auto}
+  #dest-btn .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #dest-btn .ch{color:var(--dim);font-size:11px}
+  #dest-clear{flex:0 0 auto;width:38px;background:var(--panel);border:1px solid var(--edge);border-radius:10px;color:var(--dim);font-size:13px;cursor:pointer}
+  #dest-clear:active{background:#1a1f29}
+
   /* ---------- board ---------- */
   #board{background:var(--panel);border:1px solid var(--edge);border-radius:12px;overflow:hidden;min-height:220px}
   .bhd{display:flex;justify-content:space-between;padding:9px 14px;font-size:9.5px;letter-spacing:2px;color:var(--dim);border-bottom:1px solid var(--edge)}
@@ -88,6 +100,10 @@
     <button id="station-btn" aria-label="Choose station"><span class="op"></span><span class="nm">Choose a station…</span><span class="ch">▾</span></button>
     <button id="geo-btn" title="Nearest station" aria-label="Use nearest station">📍</button>
   </div>
+  <div id="destbar">
+    <button id="dest-btn" aria-label="Choose arrival station"><span class="arrow">→</span><span class="nm">Arrival station (optional)</span><span class="ch">▾</span></button>
+    <button id="dest-clear" title="Clear arrival station" aria-label="Clear arrival station" hidden>✕</button>
+  </div>
 
   <div id="board">
     <div class="bhd"><span>LINE&nbsp;/&nbsp;DESTINATION</span><span>DEPARTS&nbsp;IN</span></div>
@@ -120,6 +136,7 @@ const PROXY = "https://sf-bay-transit-proxy.vercel.app/api/caltrain-live";
 const BART_API = "https://api.bart.gov/api/etd.aspx";
 const BART_KEY = "MW9S-E7SL-26DU-VV8V";   // BART's long-standing public demo key
 const LS_KEY = "bay_departures_station";
+const LS_DEST = "bay_departures_dest";
 const MAX_ROWS = 10;
 
 /* ---- Pacific clock: the schedule is in America/Los_Angeles seconds-since-midnight,
@@ -142,12 +159,32 @@ function countdown(ms){
 
 /* ---- state ---- */
 let station = null;          // entry from D.stations
-let liveRows = null;         // [{k, color, text, dest, note, eta(ms epoch)}] or null when live unavailable
+let destSt = null;           // optional arrival station — filters rows + adds arrival times
+let liveRows = null;         // [{k, color, text, dest, note, eta(ms epoch), li, term}] or null when live unavailable
 let liveErr = "";            // human-readable live-source note for the status line
 let fetchTimer = null;
 
 const byId = {}; D.stations.forEach(s => byId[s.id] = s);
-const lineByOpK = {}; D.lines.forEach(l => lineByOpK[l.op + ":" + l.k.toLowerCase()] = l);
+const idxById = {}; D.stations.forEach((s, i) => idxById[s.id] = i);
+const idxByBart = {}; D.stations.forEach((s, i) => { if(s.op === "bart") idxByBart[s.code] = i; });
+const idxByCtCode = {}; D.stations.forEach((s, i) => { if(s.codes) for(const c of s.codes) idxByCtCode[c] = i; });
+const lineByOpK = {}, lineIdxByOpK = {};
+D.lines.forEach((l, i) => { lineByOpK[l.op + ":" + l.k.toLowerCase()] = l; lineIdxByOpK[l.op + ":" + l.k.toLowerCase()] = i; });
+
+/* ---- arrival-time mode: real scheduled travel times between station pairs (per line) ---- */
+const ttOf = (li, o, d) => (D.tt[li] || {})[o + ">" + d];
+/* does this train actually reach the arrival station? The train's own terminal tells its
+ * direction: valid iff the arrival station lies between here and that terminal on this line
+ * (travel times must exist and be additive — a skip-stop express that misses it fails here). */
+function reaches(r, o, d){
+  if(r.li == null || r.li < 0 || r.term == null || r.term < 0) return false;
+  const od = ttOf(r.li, o, d); if(od == null) return false;
+  if(r.term === d) return true;
+  const dt = ttOf(r.li, d, r.term), ot = ttOf(r.li, o, r.term);
+  return dt != null && ot != null && Math.abs(ot - (od + dt)) < 300;
+}
+const ptHM = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", hour12: false, hour: "2-digit", minute: "2-digit" });
+const fmtArr = ms => ptHM.format(new Date(ms)).replace(/^24/, "00");
 
 /* ---- live: BART ETD (direct client-side; CORS is open on api.bart.gov) ---- */
 async function fetchBart(st){
@@ -164,7 +201,8 @@ async function fetchBart(st){
     rows.push({ k: name ? name[0].toUpperCase() + name.slice(1) : "BART",
       color: est.hexcolor || "#8b94a7", text: pickText(est.hexcolor),
       dest: e.destination, note: "Platform " + est.platform + (est.length ? " · " + est.length + " cars" : ""),
-      eta: now + min * 60000 });
+      eta: now + min * 60000,
+      li: lineIdxByOpK["bart:" + name] ?? -1, term: idxByBart[e.abbreviation] ?? -1 });
   }
   return rows;
 }
@@ -189,7 +227,8 @@ async function fetchCaltrain(st){
       rows.push({ k: lk || "Caltrain", color: line ? line.color : "#ce202f", text: line ? line.text : "#fff",
         dest: (mvj.DestinationName || "").replace(/\s*Caltrain Station\s*(North|South)bound$/i, "").replace(/\s*(North|South)bound$/i, ""),
         note: mvj.DirectionRef === "N" ? "Northbound" : mvj.DirectionRef === "S" ? "Southbound" : "",
-        eta });
+        eta,
+        li: lineIdxByOpK["ct:" + lk.toLowerCase()] ?? -1, term: idxByCtCode[mvj.DestinationRef] ?? -1 });
     }
   }
   return rows;
@@ -199,11 +238,11 @@ async function fetchCaltrain(st){
 function schedRows(st){
   const list = D.sched[st.id] || [], now = nowSeconds(), t0 = Date.now();
   const out = [];
-  for(const [t, li, di] of list){
+  for(const [t, li, di, term] of list){
     if(t < now) continue;
     const L = D.lines[li];
-    out.push({ k: L.k, color: L.color, text: L.text, dest: D.dests[di], note: "", eta: t0 + (t - now) * 1000, sched: true });
-    if(out.length >= MAX_ROWS) break;
+    out.push({ k: L.k, color: L.color, text: L.text, dest: D.dests[di], note: "", eta: t0 + (t - now) * 1000, sched: true, li, term });
+    if(out.length >= 40) break;   // over-collect; the arrival filter below may discard many
   }
   return out;
 }
@@ -230,16 +269,23 @@ function render(){
   if(!station) return;
   const now = Date.now();
   let rows = (liveRows && liveRows.length) ? liveRows.filter(r => r.eta > now - 30000) : schedRows(station);
+  if(destSt){   // arrival mode: only trains that genuinely reach the arrival station, each with its arrival time
+    const o = idxById[station.id], d = idxById[destSt.id];
+    rows = rows.filter(r => reaches(r, o, d)).map(r => ({ ...r, arr: r.eta + ttOf(r.li, o, d) * 1000 }));
+  }
   rows = rows.slice().sort((a,b) => a.eta - b.eta).slice(0, MAX_ROWS);
   const live = liveRows && liveRows.length > 0;
   $("rows").innerHTML = rows.length ? rows.map(r => {
     const cd = countdown(r.eta - now);
+    const note = (r.arr ? "arr " + esc(destSt.name) + " " + fmtArr(r.arr) : "") + (r.arr && r.note ? " · " : "") + esc(r.note || "");
     return `<div class="row">` +
       `<span class="chip" style="background:${esc(r.color)};color:${esc(r.text)}">${esc(r.k)}</span>` +
-      `<span class="dest">${esc(r.dest)}${r.note ? `<small>${esc(r.note)}</small>` : ""}</span>` +
+      `<span class="dest">${esc(r.dest)}${note ? `<small>${note}</small>` : ""}</span>` +
       `<span class="src ${r.sched ? "" : "live"}">${r.sched ? "SCHED" : "LIVE"}</span>` +
       `<span class="cd ${cd.cls}">${cd.label}</span></div>`;
-  }).join("") : `<div class="empty">No more departures today at this station.<br>(Weekday schedule — service resumes ~5 am Pacific.)</div>`;
+  }).join("") : destSt
+    ? `<div class="empty">No direct trains to ${esc(destSt.name)} right now.<br>Clear the arrival station to see all departures.</div>`
+    : `<div class="empty">No more departures today at this station.<br>(Weekday schedule — service resumes ~5 am Pacific.)</div>`;
   $("status").innerHTML =
     (liveErr ? `<span class="err">${esc(liveErr)}</span> · ` : live ? "live data · " : "official weekday schedule · ") +
     "updated " + fmtClock(nowSeconds()) + " PT";
@@ -253,26 +299,45 @@ function setStation(s, save = true){
   $("station-btn").querySelector(".nm").textContent = s.name;
   const op = $("station-btn").querySelector(".op");
   op.textContent = s.op === "bart" ? "BART" : "CALTRAIN"; op.className = "op " + s.op;
+  if(destSt && (destSt.op !== s.op || destSt.id === s.id)) setDest(null, save);   // arrival must be same operator, and not the origin itself
   if(save){ try{ localStorage.setItem(LS_KEY, s.id); }catch(e){} }
   liveRows = null; liveErr = "";
   $("rows").innerHTML = `<div class="empty">Loading departures…</div>`;
   armFetch();
 }
+function setDest(s, save = true){
+  destSt = s;
+  $("dest-btn").querySelector(".nm").textContent = s ? "Arrival: " + s.name : "Arrival station (optional)";
+  $("dest-btn").classList.toggle("set", !!s);
+  $("dest-clear").hidden = !s;
+  if(save){ try{ s ? localStorage.setItem(LS_DEST, s.id) : localStorage.removeItem(LS_DEST); }catch(e){} }
+  render();
+}
+$("dest-clear").onclick = () => setDest(null);
 
-/* ---- picker overlay ---- */
+/* ---- picker overlay (shared by origin + arrival pick) ---- */
+let pickMode = "origin";
 const sorted = D.stations.slice().sort((a,b) => a.op.localeCompare(b.op) || a.name.localeCompare(b.name));
 function paintList(q = ""){
   const needle = q.trim().toLowerCase();
-  const hits = sorted.filter(s => !needle || s.name.toLowerCase().includes(needle));
+  const pool = pickMode === "dest" ? sorted.filter(s => station && s.op === station.op && s.id !== station.id) : sorted;
+  const hits = pool.filter(s => !needle || s.name.toLowerCase().includes(needle));
   $("stations").innerHTML = hits.map(s =>
     `<button class="st" data-id="${esc(s.id)}"><span class="op ${s.op}">${s.op === "bart" ? "BART" : "CT"}</span>${esc(s.name)}</button>`
   ).join("") || `<div class="empty">No station matches “${esc(q)}”.</div>`;
 }
-$("station-btn").onclick = () => { $("picker").classList.add("open"); paintList(); $("search").value = ""; $("search").focus(); };
+function openPicker(mode){
+  pickMode = mode;
+  $("search").placeholder = mode === "dest" ? "Search arrival stations…" : "Search stations…";
+  $("picker").classList.add("open"); paintList(); $("search").value = ""; $("search").focus();
+}
+$("station-btn").onclick = () => openPicker("origin");
+$("dest-btn").onclick = () => openPicker("dest");
 $("picker-close").onclick = () => $("picker").classList.remove("open");
 $("search").oninput = e => paintList(e.target.value);
 $("stations").onclick = e => { const b = e.target.closest(".st"); if(!b) return;
-  setStation(byId[b.dataset.id]); $("picker").classList.remove("open"); };
+  if(pickMode === "dest") setDest(byId[b.dataset.id]); else setStation(byId[b.dataset.id]);
+  $("picker").classList.remove("open"); };
 
 /* ---- nearest station (explicit tap only — never auto-prompt for location) ---- */
 $("geo-btn").onclick = () => {
@@ -290,9 +355,11 @@ $("geo-btn").onclick = () => {
   }, () => { $("geo-btn").textContent = "📍"; }, { timeout: 8000 });
 };
 
-/* ---- boot: restore last station, else default to Embarcadero ---- */
-let saved = null; try{ saved = localStorage.getItem(LS_KEY); }catch(e){}
+/* ---- boot: restore last station (+ arrival), else default to Embarcadero ---- */
+let saved = null, savedDest = null;
+try{ saved = localStorage.getItem(LS_KEY); savedDest = localStorage.getItem(LS_DEST); }catch(e){}
 setStation(byId[saved] || byId["bart:EMBR"] || sorted[0], false);
+if(savedDest && byId[savedDest] && byId[savedDest].op === station.op && savedDest !== station.id) setDest(byId[savedDest], false);
 })();
 </script>
 </body>

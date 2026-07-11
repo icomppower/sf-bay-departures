@@ -11,9 +11,10 @@
  *  Output: ./data.js — window.BOARD_DATA = {
  *    stations: [{id, op, code|codes, name, lat, lon}]   // BART: ETD abbr; CT: platform stopCodes for the 511 proxy
  *    lines:    [{k, color, text, op}]                   // official route_color/route_text_color per operator
- *    dests:    ["Antioch", ...]                          // string table (schedule rows index into it)
- *    sched:    { stationId: [[secondsSinceMidnight, lineIdx, destIdx], ...] }  // one real weekday, sorted
- *  }
+ *    dests:    ["Antioch", ...]                          // headsign string table
+ *    sched:    { stationId: [[secondsSinceMidnight, lineIdx, destIdx, termStationIdx], ...] }  // one real weekday, sorted
+ *    tt:       { lineIdx: { "oIdx>dIdx": seconds } }     // median scheduled travel time between station pairs,
+ *  }                                                      // from real trips → powers the optional arrival-time mode
  *  The schedule is the OFFLINE FALLBACK; live rows come from BART's ETD
  *  API and Caltrain's 511 StopMonitoring (via sf-bay-transit-proxy).
  * ===================================================================== */
@@ -48,78 +49,98 @@ function weekdayServices(dir){
   return new Set(cal.map(r => r.service_id));
 }
 
-const stations = [], lines = [], dests = [], sched = {};
+const stations = [], lines = [], dests = [];
 const lineIdx = {}, destIdx = {};
+const tripStops = [];   // [{l, d, stops: [[stationId, t], ...]}] across both operators
 const destOf = d => { if(!(d in destIdx)){ destIdx[d] = dests.length; dests.push(d); } return destIdx[d]; };
 const lineOf = (k, color, text, op) => { const key = op + ":" + k;
   if(!(key in lineIdx)){ lineIdx[key] = lines.length; lines.push({ k, color: "#" + color, text: "#" + text, op }); }
   return lineIdx[key]; };
 
-/* ---------------- BART ---------------- */
-{
-  const dir = "gtfs-bart";
-  const stops = parseCSV(dir + "/stops.txt");
-  const parents = stops.filter(s => s.location_type === "1");
-  const parentOf = {};   // platform stop_id -> station abbr
-  for(const s of stops) if(s.parent_station) parentOf[s.stop_id] = s.parent_station;
-  for(const p of parents) stations.push({ id: "bart:" + p.stop_id, op: "bart", code: p.stop_id,
-    name: p.stop_name, lat: +p.stop_lat, lon: +p.stop_lon });
-
-  const routes = {};
-  for(const r of parseCSV(dir + "/routes.txt"))
-    if(r.route_type === "1")   // rail only — the Bus Bridge routes are not board content
-      routes[r.route_id] = { k: r.route_short_name.replace(/-[NS]$/, ""), color: r.route_color, text: r.route_text_color };
-
-  const svc = weekdayServices(dir);
-  const trips = {};   // trip_id -> {lineIdx, destIdx}
-  for(const t of parseCSV(dir + "/trips.txt")){
-    if(!svc.has(t.service_id)) continue; const r = routes[t.route_id]; if(!r) continue;
-    trips[t.trip_id] = { l: lineOf(r.k, r.color, r.text, "bart"), d: destOf(t.trip_headsign) };
-  }
-  for(const st of parseCSV(dir + "/stop_times.txt")){
-    const tr = trips[st.trip_id]; if(!tr) continue;
-    const abbr = parentOf[st.stop_id] || st.stop_id; const id = "bart:" + abbr;
-    (sched[id] ||= []).push([hms(st.departure_time || st.arrival_time), tr.l, tr.d]);
-  }
-}
-
-/* ---------------- Caltrain ---------------- */
-{
-  const dir = "gtfs-caltrain";
+/* one pass per operator: stations + per-trip ordered stop lists */
+function processOperator(dir, op, { stationExtras, routeFilter, routeLabel, nameClean }){
   const stops = parseCSV(dir + "/stops.txt");
   const parents = stops.filter(s => s.location_type === "1");
   const parentOf = {}, codesOf = {};
   for(const s of stops) if(s.parent_station){ parentOf[s.stop_id] = s.parent_station;
     (codesOf[s.parent_station] ||= []).push(s.stop_code || s.stop_id); }
-  for(const p of parents) stations.push({ id: "ct:" + p.stop_id, op: "ct", codes: codesOf[p.stop_id] || [],
-    name: p.stop_name.replace(/\s*Caltrain Station$/i, ""), lat: +p.stop_lat, lon: +p.stop_lon });
+  for(const p of parents) stations.push({ id: op + ":" + p.stop_id, op,
+    ...stationExtras(p, codesOf[p.stop_id] || []),
+    name: nameClean(p.stop_name), lat: +p.stop_lat, lon: +p.stop_lon });
 
   const routes = {};
-  for(const r of parseCSV(dir + "/routes.txt"))
-    routes[r.route_id] = { k: (r.route_short_name || r.route_id).replace(/\s*Weekday$/i, ""), color: r.route_color || "E31837", text: r.route_text_color || "FFFFFF" };
+  for(const r of parseCSV(dir + "/routes.txt")) if(routeFilter(r))
+    routes[r.route_id] = { k: routeLabel(r), color: r.route_color || "E31837", text: r.route_text_color || "FFFFFF" };
 
   const svc = weekdayServices(dir);
   const trips = {};
   for(const t of parseCSV(dir + "/trips.txt")){
     if(!svc.has(t.service_id)) continue; const r = routes[t.route_id]; if(!r) continue;
-    trips[t.trip_id] = { l: lineOf(r.k, r.color, r.text, "ct"), d: destOf(t.trip_headsign) };
+    trips[t.trip_id] = { l: lineOf(r.k, r.color, r.text, op), d: destOf(t.trip_headsign), stops: [] };
+    tripStops.push(trips[t.trip_id]);
   }
   for(const st of parseCSV(dir + "/stop_times.txt")){
     const tr = trips[st.trip_id]; if(!tr) continue;
-    const parent = parentOf[st.stop_id]; if(!parent) continue;
-    (sched["ct:" + parent] ||= []).push([hms(st.departure_time || st.arrival_time), tr.l, tr.d]);
+    const parent = parentOf[st.stop_id]; if(!parent && op === "ct") continue;   // CT rows must map to a station complex
+    tr.stops.push([op + ":" + (parent || st.stop_id), hms(st.departure_time || st.arrival_time), +st.stop_sequence]);
   }
 }
 
-/* sort each station's departures; drop stations with no weekday service (e.g. special-event only) */
-for(const id of Object.keys(sched)) sched[id].sort((a,b) => a[0] - b[0]);
-const active = stations.filter(s => (sched[s.id] || []).length);
-console.log(`stations: ${active.length} (of ${stations.length} in GTFS) · lines: ${lines.length} · dests: ${dests.length} · departures: ${Object.values(sched).reduce((n,a) => n + a.length, 0)}`);
+processOperator("gtfs-bart", "bart", {
+  stationExtras: p => ({ code: p.stop_id }),                                   // ETD API abbr
+  routeFilter: r => r.route_type === "1",                                      // rail only, not the Bus Bridge
+  routeLabel: r => r.route_short_name.replace(/-[NS]$/, ""),
+  nameClean: n => n,
+});
+processOperator("gtfs-caltrain", "ct", {
+  stationExtras: (p, codes) => ({ codes }),                                    // 511 platform stopCodes
+  routeFilter: () => true,
+  routeLabel: r => (r.route_short_name || r.route_id).replace(/\s*Weekday$/i, ""),
+  nameClean: n => n.replace(/\s*Caltrain Station$/i, ""),
+});
+
+/* per-trip stop order → the departure schedule, each trip's terminal, and the travel-time pairs */
+const sched = {}, ttLists = {};
+for(const tr of tripStops){
+  if(tr.stops.length < 2) continue;
+  tr.stops.sort((a,b) => a[2] - b[2]);
+  const term = tr.stops[tr.stops.length - 1][0];
+  /* dwell handling: board at the LAST time a trip shows a station, alight at the FIRST */
+  const firstAt = {}, lastAt = {}, order = [];
+  for(const [id, t] of tr.stops){ if(!(id in firstAt)){ firstAt[id] = t; order.push(id); } lastAt[id] = t; }
+  for(const id of order){ if(id !== term) (sched[id] ||= []).push([lastAt[id], tr.l, tr.d, term]); }
+  for(let i = 0; i < order.length; i++) for(let j = i + 1; j < order.length; j++){
+    const key = order[i] + ">" + order[j], dt = firstAt[order[j]] - lastAt[order[i]];
+    if(dt > 0) ((ttLists[tr.l] ||= {})[key] ||= []).push(dt);
+  }
+}
+
+/* drop stations with no weekday departures, then remap everything to final indexes */
+const active = stations.filter(s => (sched[s.id] || []).length || Object.values(ttLists).some(m => Object.keys(m).some(k => k.endsWith(">" + s.id))));
+const idxOf = {}; active.forEach((s, i) => idxOf[s.id] = i);
+const schedOut = {};
+for(const [id, rows] of Object.entries(sched)){
+  rows.sort((a,b) => a[0] - b[0]);
+  schedOut[id] = rows.map(([t, l, d, term]) => [t, l, d, idxOf[term] ?? -1]);
+}
+const median = a => { a.sort((x,y) => x - y); return a[a.length >> 1]; };
+const tt = {};
+for(const [l, pairs] of Object.entries(ttLists)){
+  tt[l] = {};
+  for(const [key, list] of Object.entries(pairs)){
+    const [o, d] = key.split(">");
+    if(idxOf[o] == null || idxOf[d] == null) continue;
+    tt[l][idxOf[o] + ">" + idxOf[d]] = median(list);
+  }
+}
+const nDep = Object.values(schedOut).reduce((n,a) => n + a.length, 0);
+const nPairs = Object.values(tt).reduce((n,m) => n + Object.keys(m).length, 0);
+console.log(`stations: ${active.length} (of ${stations.length} in GTFS) · lines: ${lines.length} · dests: ${dests.length} · departures: ${nDep} · travel-time pairs: ${nPairs}`);
 
 const out = "/* GENERATED by tools/build-data.mjs from BART GTFS (bart.gov) + Caltrain GTFS (511.org) — do not edit by hand */\n"
   + "window.BOARD_DATA = " + JSON.stringify({
       generated: new Date().toISOString().slice(0,10),
-      stations: active, lines, dests, sched
+      stations: active, lines, dests, sched: schedOut, tt
     }) + ";\n";
 writeFileSync("data.js", out);
 console.log(`data.js written (${(out.length/1024).toFixed(0)} KB)`);
