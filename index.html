@@ -245,7 +245,10 @@ async function fetchCaltrain(st){
       const t = call.ExpectedDepartureTime || call.ExpectedArrivalTime || call.AimedDepartureTime || call.AimedArrivalTime;
       if(!t) continue;
       const eta = Date.parse(t); if(!(eta > now - 60000)) continue;
-      const lk = (mvj.LineRef || "").replace(/\s*Weekday$/i, "");
+      // Caltrain's live feed reports "Local Weekend" on Sat/Sun (a separate GTFS route from "Local
+      // Weekday" for the same stopping pattern) — strip any day-type suffix to match the collapsed
+      // line key build-data.mjs generates, or the chip/color and arrival-mode filtering both break.
+      const lk = (mvj.LineRef || "").replace(/\s*(Weekday|Weekend|Saturday|Sunday)$/i, "");
       const line = lineByOpK["ct:" + lk.toLowerCase()];
       rows.push({ k: lk || "Caltrain", color: line ? line.color : "#ce202f", text: line ? line.text : "#fff",
         dest: (mvj.DestinationName || "").replace(/\s*Caltrain Station\s*(North|South)bound$/i, "").replace(/\s*(North|South)bound$/i, ""),

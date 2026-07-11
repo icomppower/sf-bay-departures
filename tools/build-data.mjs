@@ -95,7 +95,11 @@ processOperator("gtfs-bart", "bart", {
 processOperator("gtfs-caltrain", "ct", {
   stationExtras: (p, codes) => ({ codes }),                                    // 511 platform stopCodes
   routeFilter: () => true,
-  routeLabel: r => (r.route_short_name || r.route_id).replace(/\s*Weekday$/i, ""),
+  // Caltrain's GTFS carries separate routes per day-type for the same physical stopping pattern
+  // ("Local Weekday" vs "Local Weekend", distinct route_ids) — collapse them to one line key so
+  // client-side live matching works regardless of which day-type is currently running, and so the
+  // weekday-derived travel times below double as the (same-pattern) weekend estimate.
+  routeLabel: r => (r.route_short_name || r.route_id).replace(/\s*(Weekday|Weekend|Saturday|Sunday)$/i, ""),
   nameClean: n => n.replace(/\s*Caltrain Station$/i, ""),
 });
 
