@@ -85,7 +85,7 @@
   .duo{flex:0 0 auto;display:flex;gap:14px;align-items:flex-end}
   .duo .col{display:flex;flex-direction:column;align-items:flex-end;gap:1px}
   .duo .col i{font-style:normal;font-size:8px;letter-spacing:1.5px;color:var(--dim)}
-  .duo .cd{font-size:15px}
+  .duo .cd{font-size:19px}
   .duo .arrb{font-size:23px;font-weight:700;color:var(--amber);font-variant-numeric:tabular-nums;letter-spacing:.5px}
   .row.next{background:rgba(255,181,49,.06);box-shadow:inset 3px 0 0 var(--amber)}
   /* transfer leg 2: three columns (depart clock · leave-in timer · final arrive clock) — tighter to fit */
@@ -207,6 +207,10 @@ function countdown(ms){
               : Math.floor(s/60) + ":" + String(s % 60).padStart(2, "0");
   return { s, label, cls: s > 300 ? "green" : s >= 120 ? "amber" : "red" };
 }
+/* ---- the "run for it" timer: the train you personally board right now — always exact
+ *  MM:SS (no "DUE" collapse, no hour-shorthand) so you can judge a sprint down to the second ---- */
+const runLabel = ms => { const s = Math.max(0, Math.round(ms / 1000));
+  return String(Math.floor(s/60)).padStart(2, "0") + ":" + String(s % 60).padStart(2, "0"); };
 
 /* ---- state ---- */
 let station = null;          // entry from D.stations
@@ -388,7 +392,7 @@ function render(){
     const fare = fareFor(station, destSt);
     $("hero-lbl").textContent = "→ YOU ARRIVE " + destSt.name.toUpperCase();
     $("hero-when").textContent = fmtArr(r0.arr);
-    $("hero-sub").innerHTML = `${esc(r0.k)} · leave in <b class="${cd0.cls}">${cd0.label}</b>${r0.sched ? " · scheduled" : " · live"}${fare != null ? ` · <b>${fmtFare(fare)}</b>` : ""}`;
+    $("hero-sub").innerHTML = `${esc(r0.k)} · leave in <b class="${cd0.cls}">${runLabel(r0.eta - now)}</b>${r0.sched ? " · scheduled" : " · live"}${fare != null ? ` · <b>${fmtFare(fare)}</b>` : ""}`;
   } else if(transfer){
     const cd0 = countdown(transfer.leg1.eta - now);
     const via = D.stations[transfer.via];
@@ -396,7 +400,7 @@ function render(){
     const fareStr = (f1 != null && f2 != null) ? ` · <b>${fmtFare(f1 + f2)}</b>` : "";
     $("hero-lbl").textContent = "→ YOU ARRIVE " + destSt.name.toUpperCase();
     $("hero-when").textContent = fmtArr(transfer.arr);
-    $("hero-sub").innerHTML = `1 transfer via ${esc(via.name)} · leave in <b class="${cd0.cls}">${cd0.label}</b>${fareStr}`;
+    $("hero-sub").innerHTML = `1 transfer via ${esc(via.name)} · leave in <b class="${cd0.cls}">${runLabel(transfer.leg1.eta - now)}</b>${fareStr}`;
   }
   if(rows.length){
     $("rows").innerHTML = rows.map((r, i) => {
@@ -404,7 +408,7 @@ function render(){
       /* arrival mode: DEP + ARR as two labelled equal-size columns (the per-row LIVE/SCHED
        * tag moves into the note line — the times need the width more than the tag does) */
       const right = r.arr
-        ? `<span class="duo"><span class="col"><i>LEAVE&nbsp;IN</i><span class="cd ${cd.cls}">${cd.label}</span></span>` +
+        ? `<span class="duo"><span class="col"><i>LEAVE&nbsp;IN</i><span class="cd ${cd.cls}">${runLabel(r.eta - now)}</span></span>` +
           `<span class="col"><i>ARRIVE</i><span class="arrb">${fmtArr(r.arr)}</span></span></span>`
         : `<span class="src ${r.sched ? "" : "live"}">${r.sched ? "SCHED" : "LIVE"}</span>` +
           `<span class="cd-wrap"><span class="cd ${cd.cls}">${cd.label}</span></span>`;
@@ -420,7 +424,7 @@ function render(){
     const cdA = countdown(transfer.leg1.eta - now);
     const rowA = `<div class="row"><span class="chip" style="background:${esc(transfer.leg1.color)};color:${esc(transfer.leg1.text)}">${esc(transfer.leg1.k)}</span>` +
       `<span class="dest">${esc(transfer.leg1.dest)}<small>toward ${esc(transfer.leg1.dest)}</small></span>` +
-      `<span class="duo"><span class="col"><i>LEAVE&nbsp;IN</i><span class="cd ${cdA.cls}">${cdA.label}</span></span>` +
+      `<span class="duo"><span class="col"><i>LEAVE&nbsp;IN</i><span class="cd ${cdA.cls}">${runLabel(transfer.leg1.eta - now)}</span></span>` +
       `<span class="col"><i>TRANSFER</i><span class="arrb">${fmtArr(transfer.leg1Arr)}</span></span></span></div>`;
     // leg B: the connecting train — its own clock DEPART time, a leave-in timer to that departure
     // (same style as every other row on the board), and the final destination clock time
