@@ -27,7 +27,7 @@
 
   /* ---------- station bar ---------- */
   #stationbar{display:flex;gap:8px}
-  #station-btn{flex:1;display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--edge);
+  #station-btn{flex:1;min-width:0;display:flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--edge);
     border-radius:10px;padding:12px 14px;color:var(--ink);font:inherit;font-size:16px;cursor:pointer;text-align:left}
   #station-btn:active{background:#1a1f29}
   #station-btn .op{font-size:9px;letter-spacing:1px;padding:2.5px 6px;border-radius:4px;border:1px solid var(--edge);color:var(--dim);flex:0 0 auto}
@@ -38,11 +38,11 @@
 
   /* ---------- arrival (destination) bar ---------- */
   #destbar{display:flex;gap:8px;margin-top:-4px}
-  #dest-btn{flex:1;display:flex;align-items:center;gap:9px;background:none;border:1px dashed rgba(255,181,49,.45);
+  #dest-btn{flex:1;min-width:0;display:flex;align-items:center;gap:9px;background:none;border:1px dashed rgba(255,181,49,.45);
     border-radius:10px;padding:9px 14px;color:var(--amber);font:inherit;font-size:13px;cursor:pointer;text-align:left}
   #dest-btn.set{background:var(--panel);border-style:solid;color:var(--ink)}
   #dest-btn:active{background:#1a1f29}
-  #dest-btn .arrow{color:var(--amber);flex:0 0 auto}
+  #dest-btn .arrow{color:var(--amber);flex:0 0 auto;font-size:22px;font-weight:700;line-height:1}
   #dest-btn .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #dest-btn .ch{color:var(--dim);font-size:11px}
   #dest-clear{flex:0 0 auto;width:38px;background:var(--panel);border:1px solid var(--edge);border-radius:10px;color:var(--dim);font-size:13px;cursor:pointer}
@@ -102,6 +102,7 @@
     border-bottom:1px solid var(--edge);background:rgba(255,181,49,.08)}
   #hero.show{display:flex}
   #hero .lbl{font-size:11px;letter-spacing:2px;color:var(--amber);font-weight:700}
+  #hero .lbl .ar{font-size:18px;letter-spacing:0;vertical-align:-2px;display:inline-block}
   #hero .sub{font-size:11px;color:var(--dim);margin-top:4px;letter-spacing:.5px}
   #hero .sub b{font-weight:700}
   #hero .sub b.green{color:var(--green)} #hero .sub b.amber{color:var(--warn)}
@@ -390,7 +391,7 @@ function render(){
   if(r0){
     const cd0 = countdown(r0.eta - now);
     const fare = fareFor(station, destSt);
-    $("hero-lbl").textContent = "→ YOU ARRIVE " + destSt.name.toUpperCase();
+    $("hero-lbl").innerHTML = `<span class="ar">→</span> YOU ARRIVE ${esc(destSt.name.toUpperCase())}`;
     $("hero-when").textContent = fmtArr(r0.arr);
     $("hero-sub").innerHTML = `${esc(r0.k)} · leave in <b class="${cd0.cls}">${runLabel(r0.eta - now)}</b>${r0.sched ? " · scheduled" : " · live"}${fare != null ? ` · <b>${fmtFare(fare)}</b>` : ""}`;
   } else if(transfer){
@@ -398,7 +399,7 @@ function render(){
     const via = D.stations[transfer.via];
     const f1 = fareFor(station, via), f2 = fareFor(via, destSt);
     const fareStr = (f1 != null && f2 != null) ? ` · <b>${fmtFare(f1 + f2)}</b>` : "";
-    $("hero-lbl").textContent = "→ YOU ARRIVE " + destSt.name.toUpperCase();
+    $("hero-lbl").innerHTML = `<span class="ar">→</span> YOU ARRIVE ${esc(destSt.name.toUpperCase())}`;
     $("hero-when").textContent = fmtArr(transfer.arr);
     $("hero-sub").innerHTML = `1 transfer via ${esc(via.name)} · leave in <b class="${cd0.cls}">${runLabel(transfer.leg1.eta - now)}</b>${fareStr}`;
   }
