@@ -223,6 +223,10 @@ const idxByCtCode = {}; D.stations.forEach((s, i) => { if(s.codes) for(const c o
 const lineByOpK = {}, lineIdxByOpK = {};
 D.lines.forEach((l, i) => { lineByOpK[l.op + ":" + l.k.toLowerCase()] = l; lineIdxByOpK[l.op + ":" + l.k.toLowerCase()] = i; });
 
+/* ---- one-way fare lookup: a pure O-D price (neither operator prices by route/line taken) ---- */
+const fareFor = (a, b) => { const v = (D.fare || {})[idxById[a.id] + ">" + idxById[b.id]]; return v == null ? null : v; };
+const fmtFare = v => "$" + v.toFixed(2);
+
 /* ---- arrival-time mode: real scheduled travel times between station pairs (per line) ---- */
 const ttOf = (li, o, d) => (D.tt[li] || {})[o + ">" + d];
 /* does this train actually reach the arrival station? The train's own terminal tells its
@@ -381,14 +385,18 @@ function render(){
   $("hero").classList.toggle("show", !!(r0 || transfer));
   if(r0){
     const cd0 = countdown(r0.eta - now);
+    const fare = fareFor(station, destSt);
     $("hero-lbl").textContent = "→ YOU ARRIVE " + destSt.name.toUpperCase();
     $("hero-when").textContent = fmtArr(r0.arr);
-    $("hero-sub").innerHTML = `${esc(r0.k)} · leave in <b class="${cd0.cls}">${cd0.label}</b>${r0.sched ? " · scheduled" : " · live"}`;
+    $("hero-sub").innerHTML = `${esc(r0.k)} · leave in <b class="${cd0.cls}">${cd0.label}</b>${r0.sched ? " · scheduled" : " · live"}${fare != null ? ` · <b>${fmtFare(fare)}</b>` : ""}`;
   } else if(transfer){
     const cd0 = countdown(transfer.leg1.eta - now);
+    const via = D.stations[transfer.via];
+    const f1 = fareFor(station, via), f2 = fareFor(via, destSt);
+    const fareStr = (f1 != null && f2 != null) ? ` · <b>${fmtFare(f1 + f2)}</b>` : "";
     $("hero-lbl").textContent = "→ YOU ARRIVE " + destSt.name.toUpperCase();
     $("hero-when").textContent = fmtArr(transfer.arr);
-    $("hero-sub").innerHTML = `1 transfer via ${esc(D.stations[transfer.via].name)} · leave in <b class="${cd0.cls}">${cd0.label}</b>`;
+    $("hero-sub").innerHTML = `1 transfer via ${esc(via.name)} · leave in <b class="${cd0.cls}">${cd0.label}</b>${fareStr}`;
   }
   if(rows.length){
     $("rows").innerHTML = rows.map((r, i) => {
@@ -444,6 +452,7 @@ function setStation(s, save = true){
   const op = $("station-btn").querySelector(".op");
   op.textContent = s.op === "bart" ? "BART" : "CALTRAIN"; op.className = "op " + s.op;
   if(destSt && (destSt.op !== s.op || destSt.id === s.id)) setDest(null, save);   // arrival must be same operator, and not the origin itself
+  else if(destSt) setDest(destSt, false);   // origin changed but arrival still valid — refresh its fare label
   if(save){ try{ localStorage.setItem(LS_KEY, s.id); }catch(e){} }
   liveRows = null; liveErr = "";
   $("rows").innerHTML = `<div class="empty">Loading departures…</div>`;
@@ -452,7 +461,8 @@ function setStation(s, save = true){
 }
 function setDest(s, save = true){
   destSt = s;
-  $("dest-btn").querySelector(".nm").textContent = s ? "Arrival: " + s.name : "Set arrival station — see when you arrive";
+  const fare = s && station ? fareFor(station, s) : null;
+  $("dest-btn").querySelector(".nm").textContent = s ? "Arrival: " + s.name + (fare != null ? ` · ${fmtFare(fare)}` : "") : "Set arrival station — see when you arrive";
   $("dest-btn").classList.toggle("set", !!s);
   $("dest-clear").hidden = !s;
   if(save){ try{ s ? localStorage.setItem(LS_DEST, s.id) : localStorage.removeItem(LS_DEST); }catch(e){} }
