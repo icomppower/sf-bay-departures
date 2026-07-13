@@ -105,6 +105,7 @@
   #hero .lbl .ar{font-size:18px;letter-spacing:0;vertical-align:-2px;display:inline-block}
   #hero .sub{font-size:11px;color:var(--dim);margin-top:4px;letter-spacing:.5px}
   #hero .sub b{font-weight:700}
+  #hero .sub b.cdbig{font-size:20px;font-variant-numeric:tabular-nums;letter-spacing:.5px}
   #hero .sub b.green{color:var(--green)} #hero .sub b.amber{color:var(--warn)}
   #hero .sub b.red{color:var(--red);animation:blink .85s steps(2,start) infinite}
   #hero .when{font-size:42px;font-weight:700;color:var(--amber);font-variant-numeric:tabular-nums;line-height:1;letter-spacing:1px}
@@ -393,7 +394,7 @@ function render(){
     const fare = fareFor(station, destSt);
     $("hero-lbl").innerHTML = `<span class="ar">→</span> YOU ARRIVE ${esc(destSt.name.toUpperCase())}`;
     $("hero-when").textContent = fmtArr(r0.arr);
-    $("hero-sub").innerHTML = `${esc(r0.k)} · leave in <b class="${cd0.cls}">${runLabel(r0.eta - now)}</b>${r0.sched ? " · scheduled" : " · live"}${fare != null ? ` · <b>${fmtFare(fare)}</b>` : ""}`;
+    $("hero-sub").innerHTML = `${esc(r0.k)} · leave in <b class="cdbig ${cd0.cls}">${runLabel(r0.eta - now)}</b>${r0.sched ? " · scheduled" : " · live"}${fare != null ? ` · <b>${fmtFare(fare)}</b>` : ""}`;
   } else if(transfer){
     const cd0 = countdown(transfer.leg1.eta - now);
     const via = D.stations[transfer.via];
@@ -401,7 +402,7 @@ function render(){
     const fareStr = (f1 != null && f2 != null) ? ` · <b>${fmtFare(f1 + f2)}</b>` : "";
     $("hero-lbl").innerHTML = `<span class="ar">→</span> YOU ARRIVE ${esc(destSt.name.toUpperCase())}`;
     $("hero-when").textContent = fmtArr(transfer.arr);
-    $("hero-sub").innerHTML = `1 transfer via ${esc(via.name)} · leave in <b class="${cd0.cls}">${runLabel(transfer.leg1.eta - now)}</b>${fareStr}`;
+    $("hero-sub").innerHTML = `1 transfer via ${esc(via.name)} · leave in <b class="cdbig ${cd0.cls}">${runLabel(transfer.leg1.eta - now)}</b>${fareStr}`;
   }
   if(rows.length){
     $("rows").innerHTML = rows.map((r, i) => {
