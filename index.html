@@ -48,6 +48,21 @@
   #dest-clear{flex:0 0 auto;width:38px;background:var(--panel);border:1px solid var(--edge);border-radius:10px;color:var(--dim);font-size:13px;cursor:pointer}
   #dest-clear:active{background:#1a1f29}
 
+  /* ---------- favorites bar ---------- */
+  #favbar{display:flex;gap:8px;align-items:center;margin-top:-4px}
+  #fav-star{flex:0 0 auto;width:38px;height:38px;background:var(--panel);border:1px solid var(--edge);border-radius:10px;color:var(--dim);font-size:17px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  #fav-star.on{color:var(--amber);border-color:rgba(255,181,49,.5)}
+  #fav-star:active{background:#1a1f29}
+  #favchips{flex:1;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none}
+  #favchips::-webkit-scrollbar{display:none}
+  #favchips:empty{display:none}
+  .fav-chip{flex:0 0 auto;display:flex;align-items:center;background:var(--panel);border:1px solid var(--edge);border-radius:9px;overflow:hidden}
+  .fav-chip.active{border-color:rgba(255,181,49,.6)}
+  .fav-go{background:none;border:none;color:var(--ink);font:inherit;font-size:11.5px;padding:8px 4px 8px 10px;cursor:pointer;white-space:nowrap;max-width:38vw;overflow:hidden;text-overflow:ellipsis}
+  .fav-chip.active .fav-go{color:var(--amber)}
+  .fav-del{background:none;border:none;color:var(--dim);font-size:12px;padding:8px 9px 8px 4px;cursor:pointer}
+  .fav-del:active{color:var(--red)}
+
   /* ---------- board ---------- */
   #board{background:var(--panel);border:1px solid var(--edge);border-radius:12px;overflow:hidden;min-height:220px}
   .bhd{display:flex;justify-content:space-between;padding:9px 14px;font-size:9.5px;letter-spacing:2px;color:var(--dim);border-bottom:1px solid var(--edge)}
@@ -131,6 +146,10 @@
     <button id="dest-btn" aria-label="Choose arrival station"><span class="arrow">→</span><span class="nm">Set arrival station — see when you arrive</span><span class="ch">▾</span></button>
     <button id="dest-clear" title="Clear arrival station" aria-label="Clear arrival station" hidden>✕</button>
   </div>
+  <div id="favbar">
+    <button id="fav-star" title="Save this route" aria-label="Save current selection as favorite">☆</button>
+    <div id="favchips"></div>
+  </div>
 
   <div id="board">
     <div class="bhd"><span>LINE&nbsp;/&nbsp;DESTINATION</span><span id="bhd-right">DEPARTS&nbsp;IN</span></div>
@@ -168,6 +187,7 @@ const BART_API = "https://api.bart.gov/api/etd.aspx";
 const BART_KEY = "MW9S-E7SL-26DU-VV8V";   // BART's long-standing public demo key
 const LS_KEY = "bay_departures_station";
 const LS_DEST = "bay_departures_dest";
+const LS_FAVS = "bay_departures_favs";
 const MAX_ROWS = 10;
 
 /* ---- Pacific clock: the schedule is in America/Los_Angeles seconds-since-midnight,
@@ -194,6 +214,7 @@ let destSt = null;           // optional arrival station — filters rows + adds
 let liveRows = null;         // [{k, color, text, dest, note, eta(ms epoch), li, term}] or null when live unavailable
 let liveErr = "";            // human-readable live-source note for the status line
 let fetchTimer = null;
+let favs = [];                // saved routes: [{s: stationId, d: destStationId|null}], "My Routes"-style favorites
 
 const byId = {}; D.stations.forEach(s => byId[s.id] = s);
 const idxById = {}; D.stations.forEach((s, i) => idxById[s.id] = i);
@@ -427,6 +448,7 @@ function setStation(s, save = true){
   liveRows = null; liveErr = "";
   $("rows").innerHTML = `<div class="empty">Loading departures…</div>`;
   armFetch();
+  renderFavs();
 }
 function setDest(s, save = true){
   destSt = s;
@@ -435,8 +457,39 @@ function setDest(s, save = true){
   $("dest-clear").hidden = !s;
   if(save){ try{ s ? localStorage.setItem(LS_DEST, s.id) : localStorage.removeItem(LS_DEST); }catch(e){} }
   render();
+  renderFavs();
 }
 $("dest-clear").onclick = () => setDest(null);
+
+/* ---- favorites ("My Routes"): save the current station (or station→destination pair)
+ *  for one-tap recall — Bay Departures otherwise only remembers the single last-used pick. ---- */
+function loadFavs(){ try{ favs = JSON.parse(localStorage.getItem(LS_FAVS) || "[]"); }catch(e){ favs = []; } }
+function saveFavs(){ try{ localStorage.setItem(LS_FAVS, JSON.stringify(favs)); }catch(e){} }
+const favIdx = () => station ? favs.findIndex(f => f.s === station.id && (f.d || null) === (destSt ? destSt.id : null)) : -1;
+const favLabel = f => { const s = byId[f.s], d = f.d && byId[f.d]; return d ? s.name + " → " + d.name : s.name; };
+function renderFavs(){
+  const idx = favIdx();
+  $("fav-star").classList.toggle("on", idx !== -1);
+  $("fav-star").textContent = idx !== -1 ? "★" : "☆";
+  $("favchips").innerHTML = favs.map((f, i) => {
+    const active = i === idx;
+    return `<span class="fav-chip${active ? " active" : ""}"><button class="fav-go" data-idx="${i}">${esc(favLabel(f))}</button><button class="fav-del" data-idx="${i}" aria-label="Remove favorite">×</button></span>`;
+  }).join("");
+}
+$("fav-star").onclick = () => {
+  if(!station) return;
+  const idx = favIdx();
+  if(idx !== -1) favs.splice(idx, 1);
+  else favs.push({ s: station.id, d: destSt ? destSt.id : null });
+  saveFavs(); renderFavs();
+};
+$("favchips").onclick = e => {
+  const del = e.target.closest(".fav-del");
+  if(del){ favs.splice(+del.dataset.idx, 1); saveFavs(); renderFavs(); return; }
+  const go = e.target.closest(".fav-go");
+  if(go){ const f = favs[+go.dataset.idx]; if(!f || !byId[f.s]) return;
+    setStation(byId[f.s]); setDest(f.d && byId[f.d] ? byId[f.d] : null); }
+};
 
 /* ---- picker overlay (shared by origin + arrival pick) ---- */
 let pickMode = "origin";
@@ -481,6 +534,7 @@ $("geo-btn").onclick = () => {
 /* ---- boot: restore last station (+ arrival), else default to Embarcadero ---- */
 let saved = null, savedDest = null;
 try{ saved = localStorage.getItem(LS_KEY); savedDest = localStorage.getItem(LS_DEST); }catch(e){}
+loadFavs();
 setStation(byId[saved] || byId["bart:EMBR"] || sorted[0], false);
 if(savedDest && byId[savedDest] && byId[savedDest].op === station.op && savedDest !== station.id) setDest(byId[savedDest], false);
 })();
